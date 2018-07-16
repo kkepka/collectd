@@ -1501,6 +1501,29 @@ protocols_la_LDFLAGS = $(PLUGIN_LDFLAGS)
 protocols_la_LIBADD = libignorelist.la
 endif
 
+if BUILD_PLUGIN_REDFISH
+pkglib_LTLIBRARIES += redfish.la
+redfish_la_SOURCES = src/redfish.c
+redfish_la_CPPFLAGS = $(AM_CPPFLAGS) $(BUILD_WITH_LIBREDFISH_CPPFLAGS)
+redfish_la_LDFLAGS = $(PLUGIN_LDFLAGS) $(BUILD_WITH_LIBREDFISH_LDFLAGS)
+#redfish_la_LIBADD = $(BUILD_WITH_LIBREDFISH_LIBS)
+
+#test_plugin_snmp_agent_SOURCES = src/snmp_agent_test.c \
+#                                 src/daemon/utils_avltree.c \
+#                                 src/daemon/utils_llist.c \
+#                                 src/daemon/configfile.c \
+#                                 src/daemon/types_list.c
+#test_plugin_snmp_agent_CPPFLAGS = $(AM_CPPFLAGS) \
+#	$(BUILD_WITH_LIBNETSNMPAGENT_CPPFLAGS)
+#test_plugin_snmp_agent_LDFLAGS = $(PLUGIN_LDFLAGS) \
+#	$(BUILD_WITH_LIBNETSNMPAGENT_LDFLAGS)
+#test_plugin_snmp_agent_LDADD = liboconfig.la libplugin_mock.la \
+#	$(BUILD_WITH_LIBNETSNMPAGENT_LIBS) $(BUILD_WITH_LIBNETSNMP_LIBS)
+#
+#check_PROGRAMS += test_plugin_snmp_agent
+#TESTS += test_plugin_snmp_agent
+endif
+
 if BUILD_PLUGIN_REDIS
 pkglib_LTLIBRARIES += redis.la
 redis_la_SOURCES = src/redis.c
