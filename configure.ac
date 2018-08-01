@@ -2204,7 +2204,6 @@ if test "x$with_libredfish" = "xyes"; then
   AC_CHECK_LIB([redfish], [createServiceEnumerator],
     [with_libredfish="yes"],
     [with_libredfish="no (symbol 'createServiceEnumerator' not found)"]
-#    [with_libredfish="no (symbol 'libredfishSetDebugFunction' not found)"]
   )
 fi
 
