@@ -89,42 +89,43 @@ static void redfish_plugin_print_config(void) {
 
     strjoin(queries_str, MAX_STR_LEN, s->queries, s->queries_num, ", ");
 
-  DEBUG(PLUGIN_NAME ": --------------------");
-  DEBUG(PLUGIN_NAME ": Service: %s", s->name);
-  DEBUG(PLUGIN_NAME ":   Host: %s", s->host);
-  DEBUG(PLUGIN_NAME ":   User: %s", s->user);
-  DEBUG(PLUGIN_NAME ":   Passwd: %s", s->passwd);
-  DEBUG(PLUGIN_NAME ":   Queries[%" PRIsz "]: (%s)", s->queries_num, queries_str);
+    DEBUG(PLUGIN_NAME ": --------------------");
+    DEBUG(PLUGIN_NAME ": Service: %s", s->name);
+    DEBUG(PLUGIN_NAME ":   Host: %s", s->host);
+    DEBUG(PLUGIN_NAME ":   User: %s", s->user);
+    DEBUG(PLUGIN_NAME ":   Passwd: %s", s->passwd);
+    DEBUG(PLUGIN_NAME ":   Queries[%" PRIsz "]: (%s)", s->queries_num,
+          queries_str);
   }
 
   DEBUG(PLUGIN_NAME ": =====================================================");
-  
+
   c_avl_iterator_t *i = c_avl_get_iterator(ctx->queries);
   char *key;
   redfish_query_t *q;
-  
+
   DEBUG(PLUGIN_NAME ": QUERIES: %d", c_avl_size(ctx->queries));
 
   while (c_avl_iterator_next(i, (void **)&key, (void **)&q) == 0) {
-  DEBUG(PLUGIN_NAME ": --------------------");
-  DEBUG(PLUGIN_NAME ": Query: %s", q->name);
-  DEBUG(PLUGIN_NAME ":   Endpoint: %s", q->endpoint);
+    DEBUG(PLUGIN_NAME ": --------------------");
+    DEBUG(PLUGIN_NAME ": Query: %s", q->name);
+    DEBUG(PLUGIN_NAME ":   Endpoint: %s", q->endpoint);
     for (llentry_t *le = llist_head(q->resources); le != NULL; le = le->next) {
       redfish_resource_t *r = (redfish_resource_t *)le->value;
-  DEBUG(PLUGIN_NAME ":   Resource: %s", r->name);
-      for (llentry_t *le = llist_head(r->properties); le != NULL; le = le->next) {
+      DEBUG(PLUGIN_NAME ":   Resource: %s", r->name);
+      for (llentry_t *le = llist_head(r->properties); le != NULL;
+           le = le->next) {
         redfish_property_t *p = (redfish_property_t *)le->value;
-  DEBUG(PLUGIN_NAME ":     Property: %s", p->name);
-  DEBUG(PLUGIN_NAME ":       PluginInstance: %s", p->plugin_inst);
-  DEBUG(PLUGIN_NAME ":       Type: %s", p->type);
-  DEBUG(PLUGIN_NAME ":       TypeInstance: %s", p->type_inst);
+        DEBUG(PLUGIN_NAME ":     Property: %s", p->name);
+        DEBUG(PLUGIN_NAME ":       PluginInstance: %s", p->plugin_inst);
+        DEBUG(PLUGIN_NAME ":       Type: %s", p->type);
+        DEBUG(PLUGIN_NAME ":       TypeInstance: %s", p->type_inst);
       }
     }
   }
 
   c_avl_iterator_destroy(i);
   DEBUG(PLUGIN_NAME ": =====================================================");
-
 }
 #endif
 
@@ -237,10 +238,10 @@ static int redfish_plugin_config_resource(redfish_query_t *q,
     goto error;
 
   r->properties = llist_create();
- 
+
   if (r->properties == NULL)
     goto free_r;
- 
+
   int ret = cf_util_get_string(ci, &r->name);
 
   for (int i = 0; i < ci->children_num; i++) {
@@ -271,7 +272,8 @@ error:
   return -ENOMEM;
 }
 
-static int redfish_plugin_config_query(oconfig_item_t *ci, c_avl_tree_t *queries) {
+static int redfish_plugin_config_query(oconfig_item_t *ci,
+                                       c_avl_tree_t *queries) {
   redfish_query_t *q = calloc(1, sizeof(*q));
 
   if (q == NULL)
@@ -404,7 +406,7 @@ static int redfish_plugin_config(oconfig_item_t *ci) {
       ERROR(PLUGIN_NAME ": Invalid configuration option \"%s\".", child->key);
       return -EINVAL;
     }
-    
+
     if (ret != 0) {
       redfish_plugin_cleanup();
       return ret;
@@ -445,14 +447,15 @@ static int redfish_plugin_cleanup(void) {
   llist_destroy(ctx->services);
 
   c_avl_iterator_t *i = c_avl_get_iterator(ctx->queries);
-  
+
   char *key;
   redfish_query_t *q;
 
   while (c_avl_iterator_next(i, (void **)&key, (void **)&q) == 0) {
     for (llentry_t *le = llist_head(q->resources); le != NULL; le = le->next) {
       redfish_resource_t *r = (redfish_resource_t *)le->value;
-      for (llentry_t *le = llist_head(r->properties); le != NULL; le = le->next) {
+      for (llentry_t *le = llist_head(r->properties); le != NULL;
+           le = le->next) {
         redfish_property_t *p = (redfish_property_t *)le->value;
         sfree(p->name);
         sfree(p->plugin_inst);
@@ -461,7 +464,7 @@ static int redfish_plugin_cleanup(void) {
       }
       sfree(r->name);
     }
-    sfree(q->name);    
+    sfree(q->name);
     sfree(q->endpoint);
     sfree(q);
   }
