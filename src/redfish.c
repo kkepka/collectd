@@ -63,9 +63,12 @@ struct redfish_service_s {
   char *user;
   char *passwd;
   char *token;
+  unsigned int flags;
   char **queries;
   llist_t *query_ptrs;
   size_t queries_num;
+  enumeratorAuthentication auth;
+  redfishService *redfish;
 };
 typedef struct redfish_service_s redfish_service_t;
 
@@ -137,6 +140,18 @@ static int redfish_plugin_init(void) {
   for (llentry_t *le = llist_head(ctx->services); le != NULL; le = le->next) {
     redfish_service_t *s = (redfish_service_t *)le->value;
 
+    if (s->user && s->passwd) {
+      s->auth.authCodes.userPass.username = s->user;
+      s->auth.authCodes.userPass.password = s->passwd;
+      s->redfish = createServiceEnumerator(s->host, NULL, &s->auth, s->flags);
+    } else if (s->token) {
+      s->auth.authCodes.authToken.token = s->token;
+      s->auth.authType = REDFISH_AUTH_BEARER_TOKEN;
+      s->redfish = createServiceEnumerator(s->host, NULL, &s->auth, s->flags);
+    } else {
+      s->redfish = createServiceEnumerator(s->host, NULL, NULL, s->flags);
+    }
+
     s->query_ptrs = llist_create();
     if (s->query_ptrs == NULL)
       goto error;
@@ -153,6 +168,7 @@ static int redfish_plugin_init(void) {
         goto error;
     }
   }
+
   return 0;
 
 error:
@@ -416,7 +432,21 @@ static int redfish_plugin_config(oconfig_item_t *ci) {
   return 0;
 }
 
+void redfish_plugin_process_payload(bool success, unsigned short httpCode,
+                                    redfishPayload *payload, void *context) {}
+
 static int redfish_plugin_read(__attribute__((unused)) user_data_t *ud) {
+  for (llentry_t *le = llist_head(ctx->services); le != NULL; le = le->next) {
+    redfish_service_t *s = (redfish_service_t *)le->value;
+
+    for (llentry_t *le = llist_head(s->query_ptrs); le != NULL; le = le->next) {
+      redfish_query_t *q = (redfish_query_t *)le->value;
+
+      getPayloadByPathAsync(s->redfish, q->endpoint, NULL,
+                            redfish_plugin_process_payload, NULL);
+    }
+  }
+
   return 0;
 }
 
@@ -431,6 +461,7 @@ static int redfish_plugin_cleanup(void) {
   for (llentry_t *le = llist_head(ctx->services); le != NULL; le = le->next) {
     redfish_service_t *s = (redfish_service_t *)le->value;
 
+    cleanupServiceEnumerator(s->redfish);
     for (size_t i = 0; i < s->queries_num; i++)
       sfree(s->queries[i]);
 
