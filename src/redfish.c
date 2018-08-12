@@ -64,8 +64,8 @@ struct redfish_service_s {
   char *passwd;
   char *token;
   unsigned int flags;
-  char **queries;
-  llist_t *query_ptrs;
+  char **queries; /* List of queries */
+  llist_t *query_ptrs; /* Pointers to query structs */
   size_t queries_num;
   enumeratorAuthentication auth;
   redfishService *redfish;
@@ -81,6 +81,7 @@ typedef struct redfish_ctx_s redfish_ctx_t;
 redfish_ctx_t *ctx;
 
 static int redfish_plugin_cleanup(void);
+static int redfish_plugin_validate_config(void);
 
 #if COLLECT_DEBUG
 static void redfish_plugin_print_config(void) {
@@ -95,8 +96,13 @@ static void redfish_plugin_print_config(void) {
     DEBUG(PLUGIN_NAME ": --------------------");
     DEBUG(PLUGIN_NAME ": Service: %s", s->name);
     DEBUG(PLUGIN_NAME ":   Host: %s", s->host);
-    DEBUG(PLUGIN_NAME ":   User: %s", s->user);
-    DEBUG(PLUGIN_NAME ":   Passwd: %s", s->passwd);
+
+    if (s->user && s->passwd) {
+      DEBUG(PLUGIN_NAME ":   User: %s", s->user);
+      DEBUG(PLUGIN_NAME ":   Passwd: %s", s->passwd);
+    } else if (s->token)
+      DEBUG(PLUGIN_NAME ":   Token: %s", s->token);
+
     DEBUG(PLUGIN_NAME ":   Queries[%" PRIsz "]: (%s)", s->queries_num,
           queries_str);
   }
@@ -136,10 +142,15 @@ static int redfish_plugin_init(void) {
 #if COLLECT_DEBUG
   redfish_plugin_print_config();
 #endif
+  int ret = redfish_plugin_validate_config();
+
+  if (ret != 0)
+    return ret;
 
   for (llentry_t *le = llist_head(ctx->services); le != NULL; le = le->next) {
     redfish_service_t *s = (redfish_service_t *)le->value;
 
+    /* Preparing struct for authentication */
     if (s->user && s->passwd) {
       s->auth.authCodes.userPass.username = s->user;
       s->auth.authCodes.userPass.password = s->passwd;
@@ -156,6 +167,7 @@ static int redfish_plugin_init(void) {
     if (s->query_ptrs == NULL)
       goto error;
 
+    /* Preparing query pointers list for every service */
     for (size_t i = 0; i < s->queries_num; i++) {
       redfish_query_t *ptr;
       if (c_avl_get(ctx->queries, s->queries[i], (void **)&ptr) != 0)
@@ -177,15 +189,17 @@ error:
 }
 
 static int redfish_plugin_preconfig(void) {
-
+  /* Allocating plugin context */
   ctx = calloc(1, sizeof(*ctx));
   if (ctx == NULL)
     goto error;
 
+  /* Creating placeholder for services */
   ctx->services = llist_create();
   if (ctx->services == NULL)
     goto free_ctx;
 
+  /* Creating placeholder for queries */
   ctx->queries = c_avl_create((int (*)(const void *, const void *))strcmp);
   if (ctx->services == NULL)
     goto free_services;
@@ -432,8 +446,29 @@ static int redfish_plugin_config(oconfig_item_t *ci) {
   return 0;
 }
 
-void redfish_plugin_process_payload(bool success, unsigned short httpCode,
-                                    redfishPayload *payload, void *context) {}
+static int redfish_plugin_validate_config(void) {
+
+  /*TODO*/
+
+  return 0;
+}
+
+void redfish_plugin_process_payload(bool success, unsigned short http_code,
+                                    redfishPayload *payload, void *context) {
+  if (success == false) {
+    DEBUG(PLUGIN_NAME ": Query has failed, HTTP code = %u\n", http_code);
+  }
+
+  if (payload) {
+
+    /*TODO*/
+
+  }
+ 
+
+
+
+}
 
 static int redfish_plugin_read(__attribute__((unused)) user_data_t *ud) {
   for (llentry_t *le = llist_head(ctx->services); le != NULL; le = le->next) {
