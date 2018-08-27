@@ -64,7 +64,7 @@ struct redfish_service_s {
   char *passwd;
   char *token;
   unsigned int flags;
-  char **queries; /* List of queries */
+  char **queries;      /* List of queries */
   llist_t *query_ptrs; /* Pointers to query structs */
   size_t queries_num;
   enumeratorAuthentication auth;
@@ -80,11 +80,11 @@ typedef struct redfish_ctx_s redfish_ctx_t;
 
 redfish_ctx_t *ctx;
 
-static int redfish_plugin_cleanup(void);
-static int redfish_plugin_validate_config(void);
+static int redfish_cleanup(void);
+static int redfish_validate_config(void);
 
 #if COLLECT_DEBUG
-static void redfish_plugin_print_config(void) {
+static void redfish_print_config(void) {
   DEBUG(PLUGIN_NAME ": ====================CONFIGURATION====================");
   DEBUG(PLUGIN_NAME ": SERVICES: %d", llist_size(ctx->services));
   for (llentry_t *le = llist_head(ctx->services); le != NULL; le = le->next) {
@@ -138,44 +138,47 @@ static void redfish_plugin_print_config(void) {
 }
 #endif
 
-static int redfish_plugin_init(void) {
+static int redfish_init(void) {
 #if COLLECT_DEBUG
-  redfish_plugin_print_config();
+  redfish_print_config();
 #endif
-  int ret = redfish_plugin_validate_config();
+  int ret = redfish_validate_config();
 
   if (ret != 0)
     return ret;
 
   for (llentry_t *le = llist_head(ctx->services); le != NULL; le = le->next) {
-    redfish_service_t *s = (redfish_service_t *)le->value;
+    redfish_service_t *service = (redfish_service_t *)le->value;
 
     /* Preparing struct for authentication */
-    if (s->user && s->passwd) {
-      s->auth.authCodes.userPass.username = s->user;
-      s->auth.authCodes.userPass.password = s->passwd;
-      s->redfish = createServiceEnumerator(s->host, NULL, &s->auth, s->flags);
-    } else if (s->token) {
-      s->auth.authCodes.authToken.token = s->token;
-      s->auth.authType = REDFISH_AUTH_BEARER_TOKEN;
-      s->redfish = createServiceEnumerator(s->host, NULL, &s->auth, s->flags);
+    if (service->user && service->passwd) {
+      service->auth.authCodes.userPass.username = service->user;
+      service->auth.authCodes.userPass.password = service->passwd;
+      service->redfish = createServiceEnumerator(
+          service->host, NULL, &service->auth, service->flags);
+    } else if (service->token) {
+      service->auth.authCodes.authToken.token = service->token;
+      service->auth.authType = REDFISH_AUTH_BEARER_TOKEN;
+      service->redfish = createServiceEnumerator(
+          service->host, NULL, &service->auth, service->flags);
     } else {
-      s->redfish = createServiceEnumerator(s->host, NULL, NULL, s->flags);
+      service->redfish =
+          createServiceEnumerator(service->host, NULL, NULL, service->flags);
     }
 
-    s->query_ptrs = llist_create();
-    if (s->query_ptrs == NULL)
+    service->query_ptrs = llist_create();
+    if (service->query_ptrs == NULL)
       goto error;
 
     /* Preparing query pointers list for every service */
-    for (size_t i = 0; i < s->queries_num; i++) {
+    for (size_t i = 0; i < service->queries_num; i++) {
       redfish_query_t *ptr;
-      if (c_avl_get(ctx->queries, s->queries[i], (void **)&ptr) != 0)
-        return -1;
+      if (c_avl_get(ctx->queries, service->queries[i], (void **)&ptr) != 0)
+        goto error;
 
-      llentry_t *e = llentry_create(ptr->name, ptr);
-      if (e != NULL)
-        llist_append(s->query_ptrs, e);
+      llentry_t *entry = llentry_create(ptr->name, ptr);
+      if (entry != NULL)
+        llist_append(service->query_ptrs, entry);
       else
         goto error;
     }
@@ -185,10 +188,11 @@ static int redfish_plugin_init(void) {
 
 error:
   ERROR(PLUGIN_NAME ": Failed to allocate memory for service queries list");
+  /* TODO: verify whether libredfish cleanup is needed */
   return -ENOMEM;
 }
 
-static int redfish_plugin_preconfig(void) {
+static int redfish_preconfig(void) {
   /* Allocating plugin context */
   ctx = calloc(1, sizeof(*ctx));
   if (ctx == NULL)
@@ -215,38 +219,41 @@ error:
   return -ENOMEM;
 }
 
-static int redfish_plugin_config_property(redfish_resource_t *r,
-                                          oconfig_item_t *ci) {
-  assert(r != NULL);
-  assert(ci != NULL);
+static int redfish_config_property(redfish_resource_t *resource,
+                                   oconfig_item_t *cfg_item) {
+  assert(resource != NULL);
+  assert(cfg_item != NULL);
 
-  redfish_property_t *p = calloc(1, sizeof(*p));
+  // is this really needed to be taken from heap?
+  redfish_property_t *property = calloc(1, sizeof(*property));
 
-  if (p == NULL)
+  if (property == NULL)
     goto error;
 
-  int ret = cf_util_get_string(ci, &p->name);
-  for (int i = 0; i < ci->children_num; i++) {
+  int ret = cf_util_get_string(cfg_item, &property->name);
+  for (int i = 0; i < cfg_item->children_num; i++) {
 
-    oconfig_item_t *opt = ci->children + i;
+    oconfig_item_t *opt = cfg_item->children + i;
     if (strcasecmp("PluginInstance", opt->key) == 0)
-      ret = cf_util_get_string(opt, &p->plugin_inst);
+      ret = cf_util_get_string(opt, &property->plugin_inst);
     else if (strcasecmp("Type", opt->key) == 0)
-      ret = cf_util_get_string(opt, &p->type);
+      ret = cf_util_get_string(opt, &property->type);
     else if (strcasecmp("TypeInstance", opt->key) == 0)
-      ret = cf_util_get_string(opt, &p->type_inst);
+      ret = cf_util_get_string(opt, &property->type_inst);
     else {
       ERROR(PLUGIN_NAME ": Invalid configuration option \"%s\".", opt->key);
+      sfree(property);
       return -EINVAL;
     }
 
     if (ret != 0)
-      return ret;
+      sfree(property);
+    return ret;
   }
 
-  llentry_t *entry = llentry_create(p->name, p);
+  llentry_t *entry = llentry_create(property->name, property);
   if (entry != NULL)
-    llist_append(r->properties, entry);
+    llist_append(resource->properties, entry);
   else
     goto error;
 
@@ -254,101 +261,107 @@ static int redfish_plugin_config_property(redfish_resource_t *r,
 
 error:
   ERROR(PLUGIN_NAME ": Failed to allocate memory for property");
+  sfree(property);
   return -ENOMEM;
 }
 
-static int redfish_plugin_config_resource(redfish_query_t *q,
-                                          oconfig_item_t *ci) {
-  assert(q != NULL);
-  assert(ci != NULL);
+static int redfish_config_resource(redfish_query_t *query,
+                                   oconfig_item_t *cfg_item) {
+  assert(query != NULL);
+  assert(cfg_item != NULL);
 
-  redfish_resource_t *r = calloc(1, sizeof(*r));
+  redfish_resource_t *resource = calloc(1, sizeof(*resource));
 
-  if (r == NULL)
+  if (resource == NULL)
     goto error;
 
-  r->properties = llist_create();
+  resource->properties = llist_create();
 
-  if (r->properties == NULL)
-    goto free_r;
+  if (resource->properties == NULL)
+    goto free_resource;
 
-  int ret = cf_util_get_string(ci, &r->name);
+  int ret = cf_util_get_string(cfg_item, &resource->name);
 
-  for (int i = 0; i < ci->children_num; i++) {
-    oconfig_item_t *opt = ci->children + i;
+  for (int i = 0; i < cfg_item->children_num; i++) {
+    oconfig_item_t *opt = cfg_item->children + i;
     if (strcasecmp("Property", opt->key) == 0)
-      ret = redfish_plugin_config_property(r, opt);
+      ret = redfish_config_property(resource, opt);
     else {
       ERROR(PLUGIN_NAME ": Invalid configuration option \"%s\".", opt->key);
       return -EINVAL;
     }
 
-    if (ret != 0)
+    if (ret != 0) {
+      sfree(resource);
       return ret;
+    }
   }
 
-  llentry_t *entry = llentry_create(r->name, r);
+  llentry_t *entry = llentry_create(resource->name, resource);
   if (entry != NULL)
-    llist_append(q->resources, entry);
+    llist_append(query->resources, entry);
   else
-    goto error;
+    goto free_resource;
 
   return 0;
 
-free_r:
-  sfree(r);
+free_resource:
+  sfree(resource);
 error:
   ERROR(PLUGIN_NAME ": Failed to allocate memory for resource");
   return -ENOMEM;
 }
 
-static int redfish_plugin_config_query(oconfig_item_t *ci,
-                                       c_avl_tree_t *queries) {
-  redfish_query_t *q = calloc(1, sizeof(*q));
+static int redfish_config_query(oconfig_item_t *cfg_item,
+                                c_avl_tree_t *queries) {
+  redfish_query_t *query = calloc(1, sizeof(*query));
 
-  if (q == NULL)
+  if (query == NULL)
     goto error;
 
-  q->resources = llist_create();
+  query->resources = llist_create();
 
-  if (q->resources == NULL)
-    goto free_q;
+  if (query->resources == NULL)
+    goto free_query;
 
-  int ret = cf_util_get_string(ci, &q->name);
+  int ret = cf_util_get_string(cfg_item, &query->name);
+  // check ret value here
 
-  for (int i = 0; i < ci->children_num; i++) {
-    oconfig_item_t *opt = ci->children + i;
+  for (int i = 0; i < cfg_item->children_num; i++) {
+    oconfig_item_t *opt = cfg_item->children + i;
 
     if (strcasecmp("Endpoint", opt->key) == 0)
-      ret = cf_util_get_string(opt, &q->endpoint);
+      ret = cf_util_get_string(opt, &query->endpoint);
     else if (strcasecmp("Resource", opt->key) == 0)
-      ret = redfish_plugin_config_resource(q, opt);
+      ret = redfish_config_resource(query, opt);
     else {
       ERROR(PLUGIN_NAME ": Invalid configuration option \"%s\".", opt->key);
+      sfree(query);
       return -EINVAL;
     }
 
-    if (ret != 0)
+    if (ret != 0) {
+      sfree(query);
       return ret;
+    }
   }
 
-  ret = c_avl_insert(queries, q->name, q);
+  ret = c_avl_insert(queries, query->name, query);
 
   if (ret != 0)
-    goto free_q;
+    goto free_query;
 
   return 0;
 
-free_q:
-  sfree(q);
+free_query:
+  sfree(query);
 error:
   ERROR(PLUGIN_NAME ": Failed to allocate memory for query");
   return -ENOMEM;
 }
 
-static int redfish_plugin_read_queries(oconfig_item_t *ci,
-                                       char ***queries_ptr) {
-  size_t q_num = ci->values_num;
+static int redfish_read_queries(oconfig_item_t *cfg_item, char ***queries_ptr) {
+  size_t q_num = cfg_item->values_num;
 
   *queries_ptr = calloc(1, sizeof(**queries_ptr) * q_num);
   if (*queries_ptr == NULL)
@@ -356,11 +369,13 @@ static int redfish_plugin_read_queries(oconfig_item_t *ci,
 
   char **queries = *queries_ptr;
   for (size_t i = 0; i < q_num; i++) {
-    if (ci->values[i].type != OCONFIG_TYPE_STRING) {
+    if (cfg_item->values[i].type != OCONFIG_TYPE_STRING) {
       ERROR(PLUGIN_NAME ": 'Queries' requires string arguments");
+      sfree(queries_ptr);
       return -EINVAL;
     }
-    queries[i] = strdup(ci->values[i].value.string);
+    // TODO: ptrs from strdup also need to be freed
+    queries[i] = strdup(cfg_item->values[i].value.string);
 
     if (queries[i] == NULL)
       goto error;
@@ -370,75 +385,79 @@ static int redfish_plugin_read_queries(oconfig_item_t *ci,
 
 error:
   ERROR(PLUGIN_NAME ": Failed to allocate memory for queries list");
+  sfree(queries_ptr);
   return -ENOMEM;
 }
 
-static int redfish_plugin_config_service(oconfig_item_t *ci) {
-  redfish_service_t *s = calloc(1, sizeof(*s));
+static int redfish_config_service(oconfig_item_t *cfg_item) {
+  redfish_service_t *service = calloc(1, sizeof(*service));
 
-  if (s == NULL)
+  if (service == NULL)
     goto error;
 
-  int ret = cf_util_get_string(ci, &s->name);
+  int ret = cf_util_get_string(cfg_item, &service->name);
 
-  for (int i = 0; i < ci->children_num; i++) {
-    oconfig_item_t *opt = ci->children + i;
+  for (int i = 0; i < cfg_item->children_num; i++) {
+    oconfig_item_t *opt = cfg_item->children + i;
 
     if (strcasecmp("Host", opt->key) == 0)
-      ret = cf_util_get_string(opt, &s->host);
+      ret = cf_util_get_string(opt, &service->host);
     else if (strcasecmp("User", opt->key) == 0)
-      ret = cf_util_get_string(opt, &s->user);
+      ret = cf_util_get_string(opt, &service->user);
     else if (strcasecmp("Passwd", opt->key) == 0)
-      ret = cf_util_get_string(opt, &s->passwd);
+      ret = cf_util_get_string(opt, &service->passwd);
     else if (strcasecmp("Token", opt->key) == 0)
-      ret = cf_util_get_string(opt, &s->token);
+      ret = cf_util_get_string(opt, &service->token);
     else if (strcasecmp("Queries", opt->key) == 0) {
-      ret = redfish_plugin_read_queries(opt, &s->queries);
-      s->queries_num = opt->values_num;
+      ret = redfish_read_queries(opt, &service->queries);
+      service->queries_num = opt->values_num;
     } else {
       ERROR(PLUGIN_NAME ": Invalid configuration option \"%s\".", opt->key);
+      sfree(service);
       return -EINVAL;
     }
 
-    if (ret != 0)
+    if (ret != 0) {
+      sfree(service);
       return ret;
+    }
   }
 
-  llentry_t *entry = llentry_create(s->name, s);
+  llentry_t *entry = llentry_create(service->name, service);
   if (entry != NULL)
     llist_append(ctx->services, entry);
   else
-    goto free_s;
+    goto free_service;
 
   return 0;
 
-free_s:
-  sfree(s);
+free_service:
+  sfree(service);
 error:
   ERROR(PLUGIN_NAME ": Failed to allocate memory for service");
   return -ENOMEM;
 }
 
-static int redfish_plugin_config(oconfig_item_t *ci) {
-  int ret = redfish_plugin_preconfig();
+static int redfish_config(oconfig_item_t *cfg_item) {
+  int ret = redfish_preconfig();
 
   if (ret != 0)
     return ret;
 
-  for (int i = 0; i < ci->children_num; i++) {
-    oconfig_item_t *child = ci->children + i;
+  for (int i = 0; i < cfg_item->children_num; i++) {
+    oconfig_item_t *child = cfg_item->children + i;
 
     if (strcasecmp("Query", child->key) == 0)
-      ret = redfish_plugin_config_query(child, ctx->queries);
+      ret = redfish_config_query(child, ctx->queries);
     else if (strcasecmp("Service", child->key) == 0)
-      ret = redfish_plugin_config_service(child);
+      ret = redfish_config_service(child);
     else {
       ERROR(PLUGIN_NAME ": Invalid configuration option \"%s\".", child->key);
       return -EINVAL;
     }
 
     if (ret != 0) {
-      redfish_plugin_cleanup();
+      redfish_cleanup();
       return ret;
     }
   }
@@ -446,15 +465,15 @@ static int redfish_plugin_config(oconfig_item_t *ci) {
   return 0;
 }
 
-static int redfish_plugin_validate_config(void) {
+static int redfish_validate_config(void) {
 
   /*TODO*/
 
   return 0;
 }
 
-void redfish_plugin_process_payload(bool success, unsigned short http_code,
-                                    redfishPayload *payload, void *context) {
+void redfish_process_payload(bool success, unsigned short http_code,
+                             redfishPayload *payload, void *context) {
   if (success == false) {
     DEBUG(PLUGIN_NAME ": Query has failed, HTTP code = %u\n", http_code);
   }
@@ -462,30 +481,26 @@ void redfish_plugin_process_payload(bool success, unsigned short http_code,
   if (payload) {
 
     /*TODO*/
-
   }
- 
-
-
-
 }
 
-static int redfish_plugin_read(__attribute__((unused)) user_data_t *ud) {
+static int redfish_read(__attribute__((unused)) user_data_t *ud) {
   for (llentry_t *le = llist_head(ctx->services); le != NULL; le = le->next) {
-    redfish_service_t *s = (redfish_service_t *)le->value;
+    redfish_service_t *service = (redfish_service_t *)le->value;
 
-    for (llentry_t *le = llist_head(s->query_ptrs); le != NULL; le = le->next) {
-      redfish_query_t *q = (redfish_query_t *)le->value;
+    for (llentry_t *le = llist_head(service->query_ptrs); le != NULL;
+         le = le->next) {
+      redfish_query_t *query = (redfish_query_t *)le->value;
 
-      getPayloadByPathAsync(s->redfish, q->endpoint, NULL,
-                            redfish_plugin_process_payload, NULL);
+      getPayloadByPathAsync(service->redfish, query->endpoint, NULL,
+                            redfish_process_payload, NULL);
     }
   }
 
   return 0;
 }
 
-static int redfish_plugin_cleanup(void) {
+static int redfish_cleanup(void) {
   DEBUG(PLUGIN_NAME ": cleanup");
   DEBUG(PLUGIN_NAME ": ");
   DEBUG(PLUGIN_NAME ": ");
@@ -493,46 +508,47 @@ static int redfish_plugin_cleanup(void) {
   DEBUG(PLUGIN_NAME ": ");
   DEBUG(PLUGIN_NAME ": ");
 
-  for (llentry_t *le = llist_head(ctx->services); le != NULL; le = le->next) {
-    redfish_service_t *s = (redfish_service_t *)le->value;
+  for (llentry_t *le = llist_head(ctx->services); le; le = le->next) {
+    redfish_service_t *service = (redfish_service_t *)le->value;
 
-    cleanupServiceEnumerator(s->redfish);
-    for (size_t i = 0; i < s->queries_num; i++)
-      sfree(s->queries[i]);
+    cleanupServiceEnumerator(service->redfish);
+    for (size_t i = 0; i < service->queries_num; i++)
+      sfree(service->queries[i]);
 
-    llist_destroy(s->query_ptrs);
+    llist_destroy(service->query_ptrs);
 
-    sfree(s->name);
-    sfree(s->host);
-    sfree(s->user);
-    sfree(s->passwd);
-    sfree(s->token);
-    sfree(s->queries);
-    sfree(s);
+    sfree(service->name);
+    sfree(service->host);
+    sfree(service->user);
+    sfree(service->passwd);
+    sfree(service->token);
+    sfree(service->queries);
+    sfree(service);
   }
   llist_destroy(ctx->services);
 
   c_avl_iterator_t *i = c_avl_get_iterator(ctx->queries);
 
   char *key;
-  redfish_query_t *q;
+  redfish_query_t *query;
 
-  while (c_avl_iterator_next(i, (void **)&key, (void **)&q) == 0) {
-    for (llentry_t *le = llist_head(q->resources); le != NULL; le = le->next) {
-      redfish_resource_t *r = (redfish_resource_t *)le->value;
-      for (llentry_t *le = llist_head(r->properties); le != NULL;
+  while (c_avl_iterator_next(i, (void **)&key, (void **)&query) == 0) {
+    for (llentry_t *le = llist_head(query->resources); le != NULL;
+         le = le->next) {
+      redfish_resource_t *resource = (redfish_resource_t *)le->value;
+      for (llentry_t *le = llist_head(resource->properties); le != NULL;
            le = le->next) {
-        redfish_property_t *p = (redfish_property_t *)le->value;
-        sfree(p->name);
-        sfree(p->plugin_inst);
-        sfree(p->type);
-        sfree(p->type_inst);
+        redfish_property_t *property = (redfish_property_t *)le->value;
+        sfree(property->name);
+        sfree(property->plugin_inst);
+        sfree(property->type);
+        sfree(property->type_inst);
       }
-      sfree(r->name);
+      sfree(resource->name);
     }
-    sfree(q->name);
-    sfree(q->endpoint);
-    sfree(q);
+    sfree(query->name);
+    sfree(query->endpoint);
+    sfree(query);
   }
 
   c_avl_iterator_destroy(i);
@@ -543,8 +559,8 @@ static int redfish_plugin_cleanup(void) {
 }
 
 void module_register(void) {
-  plugin_register_init(PLUGIN_NAME, redfish_plugin_init);
-  plugin_register_complex_config(PLUGIN_NAME, redfish_plugin_config);
-  plugin_register_complex_read(NULL, PLUGIN_NAME, redfish_plugin_read, 0, NULL);
-  plugin_register_shutdown(PLUGIN_NAME, redfish_plugin_cleanup);
+  plugin_register_init(PLUGIN_NAME, redfish_init);
+  plugin_register_complex_config(PLUGIN_NAME, redfish_config);
+  plugin_register_complex_read(NULL, PLUGIN_NAME, redfish_read, 0, NULL);
+  plugin_register_shutdown(PLUGIN_NAME, redfish_cleanup);
 }

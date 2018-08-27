@@ -1506,7 +1506,8 @@ pkglib_LTLIBRARIES += redfish.la
 redfish_la_SOURCES = src/redfish.c
 redfish_la_CPPFLAGS = $(AM_CPPFLAGS) $(BUILD_WITH_LIBREDFISH_CPPFLAGS)
 redfish_la_LDFLAGS = $(PLUGIN_LDFLAGS) $(BUILD_WITH_LIBREDFISH_LDFLAGS)
-#redfish_la_LIBADD = $(BUILD_WITH_LIBREDFISH_LIBS)
+redfish_la_LIBADD = $(BUILD_WITH_LIBREDFISH_LIBS)
+redfish_la_LIBADD += -lredfish
 
 #test_plugin_snmp_agent_SOURCES = src/snmp_agent_test.c \
 #                                 src/daemon/utils_avltree.c \
